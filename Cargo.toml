@@ -21,6 +21,8 @@ tokio = { version = "1", features = [
   "net",
   "io-util",
   "signal",
+  "process",
+  "time",
 ] }
 
 # HTTP server

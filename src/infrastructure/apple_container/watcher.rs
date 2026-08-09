@@ -27,10 +27,20 @@ pub async fn watch(
     );
 
     loop {
-        if let Err(e) = reconcile(&cli, &state, &nudge_tx).await {
-            // A transient CLI failure must not take the daemon down; the
-            // next tick retries with the same state still in place.
-            warn!(error = %e, "Apple Container reconciliation failed");
+        // Race the reconcile against cancellation, not just the sleep — a
+        // slow CLI call must not hold up shutdown for its whole duration.
+        tokio::select! {
+            _ = cancel.cancelled() => {
+                info!("Apple Container watcher shutting down");
+                return;
+            }
+            result = reconcile(&cli, &state, &nudge_tx) => {
+                if let Err(e) = result {
+                    // A transient CLI failure must not take the daemon down;
+                    // the next tick retries with the last good state intact.
+                    warn!(error = %e, "Apple Container reconciliation failed");
+                }
+            }
         }
 
         tokio::select! {
@@ -49,9 +59,7 @@ async fn reconcile(
     state: &Arc<RwLock<Vec<DomainRegistration>>>,
     nudge_tx: &mpsc::Sender<()>,
 ) -> anyhow::Result<()> {
-    // `list_all` spawns a process and blocks; keep it off the async runtime.
-    let cli = cli.clone();
-    let containers = tokio::task::spawn_blocking(move || cli.list_all()).await??;
+    let containers = cli.list_all().await?;
 
     let registrations = registrations_from(&containers);
     let next = fingerprint(&registrations);

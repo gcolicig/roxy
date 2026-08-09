@@ -1,11 +1,20 @@
 use std::net::Ipv4Addr;
-use std::process::Command;
+use std::process::Stdio;
+use std::time::Duration;
 
 use serde::Deserialize;
 use thiserror::Error;
+use tokio::process::Command;
 
 /// Default name of the Apple Container binary, resolved via `PATH`.
 const DEFAULT_BINARY: &str = "container";
+
+/// How long a single CLI invocation may take before it is killed.
+///
+/// The `container` CLI talks to a helper VM that can wedge. Without a
+/// bound, a hung invocation would block daemon startup before the signal
+/// handler is installed, and stall shutdown afterwards.
+const DEFAULT_TIMEOUT: Duration = Duration::from_secs(10);
 
 #[derive(Debug, Error)]
 pub enum ContainerCliError {
@@ -17,6 +26,9 @@ pub enum ContainerCliError {
 
     #[error("Failed to run Apple Container CLI: {0}")]
     Io(#[source] std::io::Error),
+
+    #[error("Apple Container CLI timed out after {}s", .0.as_secs())]
+    TimedOut(Duration),
 
     #[error("Failed to parse Apple Container CLI output: {0}")]
     Parse(#[source] serde_json::Error),
@@ -182,6 +194,7 @@ pub fn parse_containers(json: &str) -> Result<Vec<Container>, ContainerCliError>
 #[derive(Debug, Clone)]
 pub struct ContainerCli {
     binary: String,
+    timeout: Duration,
 }
 
 impl Default for ContainerCli {
@@ -194,6 +207,15 @@ impl ContainerCli {
     pub fn new(binary: impl Into<String>) -> Self {
         Self {
             binary: binary.into(),
+            timeout: DEFAULT_TIMEOUT,
+        }
+    }
+
+    #[cfg(test)]
+    fn with_timeout(binary: impl Into<String>, timeout: Duration) -> Self {
+        Self {
+            binary: binary.into(),
+            timeout,
         }
     }
 
@@ -201,16 +223,41 @@ impl ContainerCli {
     ///
     /// Stopped containers are included deliberately: the caller needs to see
     /// them disappear from the running set to retract their registrations.
-    pub fn list_all(&self) -> Result<Vec<Container>, ContainerCliError> {
-        let output = Command::new(&self.binary)
-            .args(["ls", "--all", "--format", "json"])
-            .output()
+    pub async fn list_all(&self) -> Result<Vec<Container>, ContainerCliError> {
+        let stdout = self.run(&["ls", "--all", "--format", "json"]).await?;
+        parse_containers(&String::from_utf8_lossy(&stdout))
+    }
+
+    /// Whether the CLI is present and callable.
+    pub async fn is_available(&self) -> bool {
+        self.run(&["--version"]).await.is_ok()
+    }
+
+    /// Run the CLI, killing the child if it outlives the timeout.
+    ///
+    /// `kill_on_drop` is what makes the timeout real: dropping the
+    /// `wait_with_output` future on timeout reaps the child instead of
+    /// leaving it running and holding pipes open.
+    async fn run(&self, args: &[&str]) -> Result<Vec<u8>, ContainerCliError> {
+        let child = Command::new(&self.binary)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
             .map_err(|e| match e.kind() {
                 std::io::ErrorKind::NotFound => ContainerCliError::NotFound {
                     binary: self.binary.clone(),
                 },
                 _ => ContainerCliError::Io(e),
             })?;
+
+        let output = match tokio::time::timeout(self.timeout, child.wait_with_output()).await {
+            Ok(Ok(output)) => output,
+            Ok(Err(e)) => return Err(ContainerCliError::Io(e)),
+            Err(_) => return Err(ContainerCliError::TimedOut(self.timeout)),
+        };
 
         if !output.status.success() {
             return Err(ContainerCliError::CommandFailed {
@@ -222,15 +269,7 @@ impl ContainerCli {
             });
         }
 
-        parse_containers(&String::from_utf8_lossy(&output.stdout))
-    }
-
-    /// Whether the CLI is present and callable.
-    pub fn is_available(&self) -> bool {
-        Command::new(&self.binary)
-            .arg("--version")
-            .output()
-            .is_ok_and(|o| o.status.success())
+        Ok(output.stdout)
     }
 }
 
@@ -348,19 +387,61 @@ mod tests {
     /// Exercises the real CLI to catch argument-spelling drift, which
     /// fixtures cannot. Ignored by default: needs Apple Container installed.
     /// Run with `cargo test -- --ignored`.
-    #[test]
+    #[tokio::test]
     #[ignore]
-    fn list_all_against_real_cli() {
+    async fn list_all_against_real_cli() {
         let cli = ContainerCli::default();
-        assert!(cli.is_available(), "Apple Container CLI not installed");
-        cli.list_all().expect("listing containers failed");
+        assert!(
+            cli.is_available().await,
+            "Apple Container CLI not installed"
+        );
+        cli.list_all().await.expect("listing containers failed");
     }
 
-    #[test]
-    fn missing_binary_reports_not_found() {
+    #[tokio::test]
+    async fn missing_binary_reports_not_found() {
         let cli = ContainerCli::new("roxy-nonexistent-binary");
-        let err = cli.list_all().unwrap_err();
+        let err = cli.list_all().await.unwrap_err();
         assert!(matches!(err, ContainerCliError::NotFound { .. }));
-        assert!(!cli.is_available());
+        assert!(!cli.is_available().await);
+    }
+
+    #[tokio::test]
+    async fn nonzero_exit_is_reported_with_stderr() {
+        // `false` exits 1 and is present on every supported platform.
+        let cli = ContainerCli::new("false");
+        let err = cli.list_all().await.unwrap_err();
+        assert!(matches!(
+            err,
+            ContainerCliError::CommandFailed { ref code, .. } if code == "1"
+        ));
+    }
+
+    /// A wedged CLI must not block the caller. Without the timeout a hung
+    /// invocation stalls daemon startup before the signal handler exists,
+    /// and blocks shutdown afterwards.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn hung_cli_times_out_instead_of_blocking() {
+        use std::os::unix::fs::PermissionsExt;
+
+        // A stand-in binary that ignores its arguments and never returns.
+        let dir = std::env::temp_dir().join("roxy-apple-container-test");
+        std::fs::create_dir_all(&dir).unwrap();
+        let script = dir.join("hang");
+        std::fs::write(&script, "#!/bin/sh\nsleep 30\n").unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cli = ContainerCli::with_timeout(script.to_string_lossy(), Duration::from_millis(150));
+        let started = std::time::Instant::now();
+
+        let err = cli.list_all().await.unwrap_err();
+
+        assert!(matches!(err, ContainerCliError::TimedOut(_)));
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "returned in {:?}, so the timeout did not fire",
+            started.elapsed()
+        );
     }
 }

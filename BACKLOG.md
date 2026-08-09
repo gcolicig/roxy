@@ -222,6 +222,41 @@ falsche Passage in `docs/apple-container.md` ist ersetzt.
 
 ---
 
+## Ergebnis Review
+
+Fremdreview des Branch-Diffs (`02dd83e..HEAD`), frischer Kontext, anderes Modell.
+Zwei Befunde, beide berechtigt und behoben:
+
+**Kein Timeout auf CLI-Aufrufen (blockierend).** `std::process::Command::output()`
+hatte keine Zeitschranke. Zwei Folgen, beide selbst nachgeprüft:
+`is_available()` lief in `lifecycle.rs:87` — 65 Zeilen **vor** dem Spawn des
+Signal-Handlers in Zeile 152. Ein hängender `container`-Aufruf hätte den Start
+blockiert, bevor SIGTERM überhaupt behandelt werden kann; nur SIGKILL hätte
+geholfen. Zusätzlich lief `list_all` in `spawn_blocking`, und Tokios Blocking-Pool
+wartet beim Runtime-Drop unbegrenzt auf laufende Blocking-Tasks — ein wedged
+`container`-Prozess hätte also auch das Beenden verhindert.
+
+Behoben durch Umstellung auf `tokio::process::Command` mit
+`tokio::time::timeout` und `kill_on_drop(true)`, Default 10s. `list_all` und
+`is_available` sind jetzt async, `spawn_blocking` entfällt ersatzlos.
+
+**Cancellation lief nicht gegen den Reconcile.** Der Poll-Loop prüfte Abbruch nur
+zwischen den Ticks. Jetzt läuft `reconcile` selbst im `select!` gegen
+`cancel.cancelled()`.
+
+Verifiziert nach dem Umbau: Discovery weiterhin funktionsfähig (`307` nach 2s),
+`SIGTERM` beendet den Daemon in **6ms** mit sauberem `Apple Container watcher
+shutting down` im Log. Neuer Test `hung_cli_times_out_instead_of_blocking` deckt
+den Timeout mit einem künstlich hängenden Stand-in-Binary ab.
+
+Ohne Befund geprüft: Parsing gegen die Fixture, Discovery-Regeln, Layer-Regeln der
+projekteigenen `CLAUDE.md` (Rules 2/3/5/6), Lock-Nutzung (kein Guard über einem
+`.await`), Kanal-Backpressure, und die Behauptung zur Provider-Reihenfolge — der
+Sort in `router.rs:30-35` ist stabil, die Add-Reihenfolge bleibt also erhalten.
+
+Bekannte Lücke: `reconcile()` und `watch()` selbst sind nicht getestet, nur ihre
+reinen Hilfsfunktionen. Beide Befunde wären dadurch auch nicht aufgefallen.
+
 ## Ergebnis Kollisionswarnung
 
 `ProviderRegistry::load` meldet jetzt, wenn zwei Provider dasselbe Pattern liefern.

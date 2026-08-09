@@ -84,7 +84,7 @@ pub async fn run(verbose: bool, config_path: &Path, paths: &RoxyPaths) -> Result
     // config file > Docker > Apple Container.
     let apple_container_provider = if config.apple_container.enabled {
         let cli = ContainerCli::default();
-        if cli.is_available() {
+        if cli.is_available().await {
             info!("Apple Container integration enabled");
             let provider = Arc::new(AppleContainerProvider::new(cli));
             registry.add(provider.clone());
