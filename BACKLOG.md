@@ -196,14 +196,25 @@ Ausserdem bestätigt: „added"/„removed" erscheinen genau einmal pro Änderun
 bei jedem Tick — das Diffing arbeitet wie vorgesehen.
 
 Nebenbefund: `roxy list` zeigt nur Registrierungen aus der Config-Datei, nicht die
-dynamisch entdeckten. Gilt für den Docker-Provider genauso. Ob das gewollt ist,
-wäre in E zu dokumentieren oder als eigener Punkt zu behandeln.
+dynamisch entdeckten. Gilt für den Docker-Provider genauso. In E1 als bekanntes
+Verhalten im Troubleshooting dokumentiert; ob es so bleiben soll, ist damit noch
+nicht entschieden.
 
 ### E — Dokumentation
 
-- [ ] **E1** `docs/apple-container.md` analog zu `docs/docker.md`.
-- [ ] **E2** README-Feature-Tabelle und Roadmap-Abschnitt ergänzen.
-- [ ] **E3** CHANGELOG-Eintrag (Repo nutzt `git-cliff`, Conventional Commits sind Pflicht).
+- [x] **E1** **Erledigt** (2026-08-06). `docs/apple-container.md` analog zu
+      `docs/docker.md`: Quick Start, Discovery-Regeln, Abgrenzung zu Docker,
+      Config-Tabelle, Label-Referenz, Domain- und Port-Auflösung, Verhalten bei
+      IP-Wechsel, Provider-Reihenfolge, Troubleshooting.
+- [x] **E2** **Erledigt.** README: Feature-Abschnitt, Vergleichstabelle, Roadmap,
+      Doku-Links. `docs/README.md`: eigener Abschnitt neben der Docker-Integration.
+- [x] **E3** **Kein manueller Eintrag nötig.** `CHANGELOG.md` wird vollständig von
+      `git cliff -o CHANGELOG.md` aus den Commits generiert (`justfile:44-46`,
+      Release-Rezept ab `justfile:48`). Die `feat(apple-container): …`-Commits landen
+      beim nächsten Release automatisch darin. Eine Handbearbeitung würde beim
+      nächsten Lauf überschrieben.
+      Nicht geprüft: `git-cliff` ist lokal nicht installiert, die Vorschau
+      (`just changelog`) konnte daher nicht laufen.
 
 ---
 

@@ -495,6 +495,29 @@ See [docker.md](docker.md) for the full guide: labels
 reference, container-to-Roxy communication, troubleshooting,
 and more.
 
+## Apple Container Integration
+
+On macOS, Roxy can also discover containers managed by
+[apple/container](https://github.com/apple/container). Enable it
+in `config.toml`:
+
+```toml
+[apple_container]
+enabled = true
+```
+
+Every container gets its own IP there, so Roxy proxies straight to
+the container rather than to a published host port. Registration is
+opt-in per container:
+
+```bash
+container run -d --name web -l roxy.enable=true -p 3000:3000 my-image
+# https://web.roxy
+```
+
+See [apple-container.md](apple-container.md) for the full guide:
+labels reference, port resolution, and how it differs from Docker.
+
 ## Troubleshooting
 
 ### Browser Shows "Not Secure" or Certificate Warnings

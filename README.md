@@ -128,6 +128,16 @@ No config files to manage.
 - ✓ **Label-driven** — Fine-tune with `roxy.domain`, `roxy.port`,
   and `roxy.wildcard` labels
 
+**Apple Container Integration (macOS):**
+
+- ✓ **Auto-discovery** — Containers managed by
+  [apple/container](https://github.com/apple/container) are registered
+  as `.roxy` domains, opt-in per container via labels
+- ✓ **Direct routing** — Every container has its own IP, so Roxy
+  proxies straight to it. Publishing ports is optional
+- ✓ **Survives restarts** — A container that comes back on a different
+  IP is re-registered automatically
+
 ## Real-World Examples
 
 ### Testing Stripe Webhooks Locally
@@ -368,6 +378,7 @@ For configuration details, logging options, and file locations see the [full doc
 | WebSocket support   | ✓    | ✓            | ✓             | ~             | ✓       | ~          |
 | Wildcard subdomains | ✓    | Config-based | Manual setup  | ✗             | ✗       | ✗          |
 | Docker auto-discovery | ✓  | ✗            | Labels only   | ✗             | ✗       | ✗          |
+| Apple Container auto-discovery | ✓ | ✗      | ✗             | ✗             | ✗       | ✗          |
 
 **Caddy** is the closest alternative — it has excellent HTTPS ergonomics with a built-in CA,
 `caddy trust`, and a powerful CLI (`caddy reverse-proxy --from domain --to target`). The main
@@ -432,6 +443,9 @@ Roxy is ready for daily development use on macOS and Linux. Recent additions and
   DNS integration and system CA trust
 - [x] **Docker auto-discovery** — Compose services get `.roxy`
   domains automatically with label-driven customization
+- [x] **Apple Container auto-discovery** — containers managed by
+  `apple/container` get `.roxy` domains, routed directly to the
+  container IP
 - [ ] **Docker network DNS** — resolve `.roxy` domains
   inside containers without `extra_hosts`
 
@@ -444,6 +458,7 @@ Have a feature idea?
 
 - 📖 **Full documentation**: [docs/README.md](docs/README.md)
 - 🐳 **Docker guide**: [docs/docker.md](docs/docker.md)
+- 🍎 **Apple Container guide**: [docs/apple-container.md](docs/apple-container.md)
 - 🐧 **Linux guide**: [docs/linux.md](docs/linux.md)
 - 🐛 **Having issues?**: Check the [troubleshooting guide](docs/README.md#troubleshooting)
 - 💬 **Questions or feedback?**: [Open an issue](https://github.com/rbas/roxy/issues)
