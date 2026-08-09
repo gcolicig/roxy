@@ -34,7 +34,9 @@ Drei Annahmen des Docker-Providers gelten bei Apple Container nicht:
 ### Umgebung
 
 - `container` CLI 1.2.0 (`/opt/homebrew/bin/container`)
-- Container-Subnetz auf dieser Maschine: `192.168.65.0/24` — **maschinenabhängig, nie hartkodieren**
+- Container-Subnetz ist **nicht stabil**: derselbe Container `omniroute` lag am 2026-08-05
+  auf `192.168.65.6/24` und nach einem Neustart am 2026-08-06 auf `192.168.64.2/24`.
+  Weder IP noch Subnetz dürfen hartkodiert oder gecacht werden. Belegt E4 empirisch.
 - `container ls -a --format json` liefert `status.networks[]`, `status.state`, `configuration.labels`
 - `container run -l key=value` wird unterstützt
 - Rust 1.96.1, Crate ist `edition = "2024"`
@@ -69,13 +71,39 @@ Apple Container vergibt beim Neustart potenziell eine andere IP. Der Poller muss
 
 ### A — Validierung vor dem Bau
 
-- [ ] **A1** Manueller End-to-End-Test ohne Codeänderung: `roxy install`, Container starten,
-      `roxy register test.roxy --route "/=<container-ip>:<port>"`, `https://test.roxy` aufrufen.
-      **Blockiert alles Weitere** — wenn das nicht trägt, ist die Grundannahme falsch.
+- [x] **A1** End-to-End-Test ohne Codeänderung — **bestanden für HTTP** (2026-08-06).
+      Details unter „Ergebnis A1". Die Grundannahme trägt: roxy proxyt unverändert
+      auf eine Apple-Container-IP.
+- [ ] **A1b** HTTPS-Pfad gegen ein Container-Ziel. Ungetestet, weil `roxy install` die
+      Root-CA erst nach einem Root-Check anlegt (`src/application/install.rs:43-51`) —
+      braucht `sudo`. Risiko gering: TLS-Terminierung ist unabhängig davon, ob das
+      Upstream-Ziel `127.0.0.1` oder eine Container-IP ist.
 - [ ] **A2** Prüfen, ob roxy-Resolver (`/etc/resolver/roxy`) und ein Apple-Container-Resolver
-      koexistieren. Erwartung laut Code: ja. Gegenprobe mit `scutil --dns`.
+      koexistieren. Erwartung laut Code: ja. Gegenprobe mit `scutil --dns`. Braucht `sudo`.
 - [ ] **A3** Verhalten bei gestopptem/neu gestartetem Container beobachten: bleibt die
       Registrierung stehen, was liefert der Proxy (Fehlerseite vs. Hänger)?
+- [ ] **A4** Hostname-Ziel (statt IP) gegen eine Apple-DNS-Domain testen. Bisher nur
+      IP-Ziele verifiziert; der Code-Pfad ist derselbe, der Resolver-Pfad nicht.
+
+#### Ergebnis A1
+
+Aufbau ohne `sudo`: eigene Config mit `http_port = 8080`, `https_port = 8443`,
+`dns_port = 15353` und allen `[paths]` in einem Scratch-Verzeichnis, dann
+`roxy -c <config> start --foreground`. Registrierung über die normale CLI:
+
+```
+roxy -c <config> register omniroute.roxy --route "/=192.168.64.2:20128"
+```
+
+| Prüfung | Ergebnis |
+|---|---|
+| Direkt an den Container (Baseline) | `307` |
+| Durch roxy, `Host: omniroute.roxy` | `307`, identische Upstream-Header, korrekter Body |
+| Durch roxy, `Host: nope.roxy` (Kontrolle) | `404` — Routing greift namensbasiert, kein Zufallstreffer |
+
+Nebenbefund: `roxy register` funktioniert ohne Root und warnt sauber, dass HTTPS
+mangels CA deaktiviert bleibt, statt abzubrechen. Das unprivilegierte Setup taugt
+damit als Testharness für B und C, ohne das System anzufassen.
 
 ### B — Container-Adapter
 
@@ -142,8 +170,9 @@ Apple Container vergibt beim Neustart potenziell eine andere IP. Der Poller muss
 
 - Alle Datei-/Zeilenangaben gegen `v1.0.2` (`02dd83e`) geprüft. Bei Rebase auf Upstream
   neu verifizieren.
-- Noch **nicht** geprüft: ob `cargo build` auf dieser Maschine durchläuft, und ob
-  `container ls --format json` bei mehreren Containern und beim Netzwerk-Typ `bridge`
-  dasselbe Schema liefert (getestet nur mit einem Container, `variant: reserved`).
+- `cargo build --release` läuft durch (Rust 1.96.1, ~75s kalt).
+- Noch **nicht** geprüft: ob `container ls --format json` bei mehreren Containern und
+  beim Netzwerk-Typ `bridge` dasselbe Schema liefert (getestet nur mit einem Container,
+  `variant: reserved`). Ebenso ungeprüft: WebSocket-Weiterleitung an ein Container-Ziel.
 - Die Einordnung von `portless`, `dev-bind` und `rust-rpxy` stammt aus einer Recherche
   ausserhalb dieses Repos und ist nicht gegen deren Quellcode verifiziert.
