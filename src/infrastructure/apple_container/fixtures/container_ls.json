@@ -1,0 +1,207 @@
+[
+    {
+        "configuration": {
+            "capAdd": [],
+            "capDrop": [],
+            "creationDate": "2026-08-09T21:46:05Z",
+            "dns": {
+                "nameservers": [],
+                "options": [],
+                "searchDomains": []
+            },
+            "id": "roxy-fixture-noports",
+            "image": {
+                "descriptor": {
+                    "digest": "sha256:92c768c56e2de32c51a0621ef182835018b00b288c9bb235c5c5e4514658c1a1",
+                    "mediaType": "application/vnd.oci.image.index.v1+json",
+                    "size": 1609
+                },
+                "reference": "docker.io/diegosouzapw/omniroute:latest"
+            },
+            "initProcess": {
+                "arguments": [
+                    "node",
+                    "dev/run-standalone.mjs"
+                ],
+                "environment": [
+                    "PORT=20128",
+                    "DATA_DIR=/app/data",
+                    "NODE_OPTIONS=--max-old-space-size=1024",
+                    "HOSTNAME=0.0.0.0",
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    "OMNIROUTE_MEMORY_MB=1024",
+                    "OMNIROUTE_MIGRATIONS_DIR=/app/migrations",
+                    "NODE_ENV=production",
+                    "NODE_VERSION=26.5.0"
+                ],
+                "executable": "/tmp/check-permissions.sh",
+                "rlimits": [],
+                "supplementalGroups": [],
+                "terminal": false,
+                "user": {
+                    "raw": {
+                        "userString": "node"
+                    }
+                },
+                "workingDirectory": "/app"
+            },
+            "labels": {
+                "roxy.domain": "fixture.roxy",
+                "roxy.enable": "true"
+            },
+            "mounts": [],
+            "networks": [
+                {
+                    "network": "default",
+                    "options": {
+                        "hostname": "roxy-fixture-noports",
+                        "mtu": 1280
+                    }
+                }
+            ],
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            },
+            "publishedPorts": [],
+            "publishedSockets": [],
+            "readOnly": false,
+            "resources": {
+                "cpuOverhead": 1,
+                "cpus": 4,
+                "memoryInBytes": 1073741824
+            },
+            "rosetta": false,
+            "runtimeHandler": "container-runtime-linux",
+            "ssh": false,
+            "sysctls": {},
+            "useInit": false,
+            "virtualization": false
+        },
+        "id": "roxy-fixture-noports",
+        "status": {
+            "networks": [],
+            "state": "stopped"
+        }
+    },
+    {
+        "configuration": {
+            "capAdd": [],
+            "capDrop": [],
+            "creationDate": "2026-08-05T21:40:07Z",
+            "dns": {
+                "nameservers": [],
+                "options": [],
+                "searchDomains": []
+            },
+            "id": "omniroute",
+            "image": {
+                "descriptor": {
+                    "digest": "sha256:92c768c56e2de32c51a0621ef182835018b00b288c9bb235c5c5e4514658c1a1",
+                    "mediaType": "application/vnd.oci.image.index.v1+json",
+                    "size": 1609
+                },
+                "reference": "docker.io/diegosouzapw/omniroute:latest"
+            },
+            "initProcess": {
+                "arguments": [
+                    "node",
+                    "dev/run-standalone.mjs"
+                ],
+                "environment": [
+                    "PORT=20128",
+                    "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+                    "HOSTNAME=0.0.0.0",
+                    "OMNIROUTE_MIGRATIONS_DIR=/app/migrations",
+                    "OMNIROUTE_MEMORY_MB=1024",
+                    "NODE_ENV=production",
+                    "NODE_OPTIONS=--max-old-space-size=1024",
+                    "NODE_VERSION=26.5.0",
+                    "DATA_DIR=/app/data"
+                ],
+                "executable": "/tmp/check-permissions.sh",
+                "rlimits": [],
+                "supplementalGroups": [],
+                "terminal": false,
+                "user": {
+                    "raw": {
+                        "userString": "node"
+                    }
+                },
+                "workingDirectory": "/app"
+            },
+            "labels": {},
+            "mounts": [
+                {
+                    "destination": "/app/data",
+                    "options": [],
+                    "source": "/Users/gcolicigno/Library/Application Support/com.apple.container/volumes/omniroute-data/volume.img",
+                    "type": {
+                        "volume": {
+                            "cache": {
+                                "on": {}
+                            },
+                            "format": "ext4",
+                            "name": "omniroute-data",
+                            "sync": {
+                                "fsync": {}
+                            }
+                        }
+                    }
+                }
+            ],
+            "networks": [
+                {
+                    "network": "default",
+                    "options": {
+                        "hostname": "omniroute",
+                        "mtu": 1280
+                    }
+                }
+            ],
+            "platform": {
+                "architecture": "arm64",
+                "os": "linux"
+            },
+            "publishedPorts": [
+                {
+                    "containerPort": 20128,
+                    "count": 1,
+                    "hostAddress": "127.0.0.1",
+                    "hostPort": 20128,
+                    "proto": "tcp"
+                }
+            ],
+            "publishedSockets": [],
+            "readOnly": false,
+            "resources": {
+                "cpuOverhead": 1,
+                "cpus": 4,
+                "memoryInBytes": 1073741824
+            },
+            "rosetta": false,
+            "runtimeHandler": "container-runtime-linux",
+            "ssh": false,
+            "sysctls": {},
+            "useInit": false,
+            "virtualization": false
+        },
+        "id": "omniroute",
+        "status": {
+            "networks": [
+                {
+                    "hostname": "omniroute",
+                    "ipv4Address": "192.168.64.2/24",
+                    "ipv4Gateway": "192.168.64.1",
+                    "ipv6Address": "fdf5:e6d4:f8c6:2d39:f861:bff:febc:ae2b/64",
+                    "macAddress": "fa:61:0b:bc:ae:2b",
+                    "mtu": 1280,
+                    "network": "default",
+                    "variant": "reserved"
+                }
+            ],
+            "startedDate": "2026-08-09T20:53:30Z",
+            "state": "running"
+        }
+    }
+]

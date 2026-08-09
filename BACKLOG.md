@@ -50,11 +50,20 @@ Wenn roxy direkt auf die Container-IP proxyt, ist `container system dns create` 
 Host-Zugriff nicht nötig. Es bleibt nur für Container-zu-Container-Auflösung relevant.
 Vorschlag: IP-Targets als Default, Apples DNS explizit ausserhalb des Scopes.
 
-**E2 — Zielport-Ermittlung.**
-Ohne Port-Publishing gibt es keine `host_port_mappings`. Woher kommt der Container-Port?
-Kandidaten: Label `roxy.port`, `ExposedPorts` aus dem Image-Config, oder Pflichtangabe.
-Vorschlag: Label `roxy.port` mit Fallback auf einen einzelnen exposed port; Skip bei
-Mehrdeutigkeit mit klarer Meldung.
+**E2 — Zielport-Ermittlung.** *(Datenlage geklärt in B1, Entscheidung offen)*
+Apple Container kennt sehr wohl Port-Publishing: `configuration.publishedPorts[]` mit
+`containerPort`, `hostPort`, `hostAddress`, `proto`. Anders als bei Docker ist es aber
+**optional** — jeder Container ist ohnehin über seine eigene IP erreichbar. Verifiziert:
+ein Container mit `-p` liefert einen Eintrag, ein Container ohne `-p` eine leere Liste.
+
+Damit gibt es zwei brauchbare Quellen und eine Rangfolge ist nötig. Vorschlag:
+1. Label `roxy.port` — explizit, gewinnt immer
+2. genau ein Eintrag in `publishedPorts` → dessen `containerPort` (Ziel bleibt die
+   Container-IP, nicht `127.0.0.1:hostPort`)
+3. sonst Skip mit klarer Meldung
+
+Bewusst **nicht** genutzt: `hostPort` als Ziel. Das würde Dockers Umweg nachbauen und
+den einzigen strukturellen Vorteil von Apple Container wegwerfen.
 
 **E3 — Poll-Intervall und Diffing.**
 Kein Event-Stream heisst: Intervall wählen, gegen letzten Stand diffen, Reload nur bei
@@ -107,11 +116,16 @@ damit als Testharness für B und C, ohne das System anzufassen.
 
 ### B — Container-Adapter
 
-- [ ] **B1** `src/infrastructure/apple_container/cli.rs` — dünner Wrapper um
-      `container ls -a --format json`. Serde-Modelle nur für die tatsächlich gebrauchten
-      Felder (`configuration.id`, `configuration.labels`, `status.state`,
-      `status.networks[].ipv4Address`). CIDR-Suffix (`/24`) abschneiden.
-      Typisierte Fehler für: CLI nicht gefunden, Exit != 0, JSON-Parse-Fehler.
+- [x] **B1** `src/infrastructure/apple_container/cli.rs` — **erledigt** (2026-08-06).
+      Wrapper um `container ls --all --format json`, Serde-Modelle für `id`,
+      `configuration.labels`, `configuration.publishedPorts[]`, `status.state`,
+      `status.networks[].ipv4Address`. CIDR-Suffix wird abgeschnitten, kaputte
+      Adressen fallen einzeln weg statt die Liste zu killen. Typisierte Fehler:
+      `NotFound`, `CommandFailed`, `Io`, `Parse`. Parsing ist von der
+      Prozessausführung getrennt (`parse_containers`), damit es ohne CLI testbar ist.
+      13 Unit-Tests gegen eine echte aufgezeichnete Ausgabe (`fixtures/container_ls.json`,
+      ein laufender und ein gestoppter Container) plus ein `#[ignore]`-Test gegen die
+      echte CLI, der die Argument-Schreibweise absichert.
 - [ ] **B2** `discovery.rs` — `evaluate_container`-Äquivalent gegen Container-IP statt
       `127.0.0.1:host_port`. Qualifikation über `roxy.enable=true` + `roxy.domain`.
       Skip mit Begründung, wenn Container nicht läuft oder keine IPv4 hat.
@@ -170,9 +184,11 @@ damit als Testharness für B und C, ohne das System anzufassen.
 
 - Alle Datei-/Zeilenangaben gegen `v1.0.2` (`02dd83e`) geprüft. Bei Rebase auf Upstream
   neu verifizieren.
-- `cargo build --release` läuft durch (Rust 1.96.1, ~75s kalt).
-- Noch **nicht** geprüft: ob `container ls --format json` bei mehreren Containern und
-  beim Netzwerk-Typ `bridge` dasselbe Schema liefert (getestet nur mit einem Container,
-  `variant: reserved`). Ebenso ungeprüft: WebSocket-Weiterleitung an ein Container-Ziel.
+- `cargo build --release` läuft durch (Rust 1.96.1, ~75s kalt). `cargo test`: 251 grün.
+  `cargo clippy --all-targets` meldet nur Vorbestehendes in `src/application/testkit.rs`.
+- Schema für laufende **und** gestoppte Container verifiziert: gestoppt heisst
+  `status.state = "stopped"`, `status.networks = []`, kein `startedDate`.
+- Noch **nicht** geprüft: Netzwerk-Typ `bridge` (Fixture nur mit `variant: reserved`),
+  und WebSocket-Weiterleitung an ein Container-Ziel.
 - Die Einordnung von `portless`, `dev-bind` und `rust-rpxy` stammt aus einer Recherche
   ausserhalb dieses Repos und ist nicht gegen deren Quellcode verifiziert.
