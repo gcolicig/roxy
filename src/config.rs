@@ -105,6 +105,47 @@ pub struct DockerConfig {
     pub enabled: bool,
 }
 
+fn default_poll_interval_secs() -> u64 {
+    2
+}
+
+/// Apple Container integration configuration.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct AppleContainerConfig {
+    /// Enable Apple Container auto-discovery of containers.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// Seconds between `container ls` polls.
+    ///
+    /// Apple Container has no event stream, so discovery polls. Each tick
+    /// costs one process invocation — don't set this too low.
+    #[serde(default = "default_poll_interval_secs")]
+    pub poll_interval_secs: u64,
+}
+
+impl Default for AppleContainerConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            poll_interval_secs: default_poll_interval_secs(),
+        }
+    }
+}
+
+impl AppleContainerConfig {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.enabled && self.poll_interval_secs == 0 {
+            return Err("apple_container.poll_interval_secs cannot be 0".into());
+        }
+        Ok(())
+    }
+
+    pub fn poll_interval(&self) -> std::time::Duration {
+        std::time::Duration::from_secs(self.poll_interval_secs)
+    }
+}
+
 /// All resolved paths needed by Roxy components.
 /// Loaded once from config, then passed to components via DI.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]

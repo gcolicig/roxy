@@ -9,6 +9,8 @@ use tracing::{info, warn};
 
 use super::Server;
 use crate::application::provider_registry::ProviderRegistry;
+use crate::infrastructure::apple_container::AppleContainerProvider;
+use crate::infrastructure::apple_container::cli::ContainerCli;
 use crate::infrastructure::config::ConfigStore;
 use crate::infrastructure::config::watcher::ConfigFileProvider;
 use crate::infrastructure::docker::DockerProvider;
@@ -75,6 +77,29 @@ pub async fn run(verbose: bool, config_path: &Path, paths: &RoxyPaths) -> Result
         None
     };
 
+    // Optionally enable Apple Container auto-discovery.
+    //
+    // Added after Docker so provider precedence is deterministic: on a
+    // duplicate domain the router takes the first match, making the order
+    // config file > Docker > Apple Container.
+    let apple_container_provider = if config.apple_container.enabled {
+        let cli = ContainerCli::default();
+        if cli.is_available() {
+            info!("Apple Container integration enabled");
+            let provider = Arc::new(AppleContainerProvider::new(cli));
+            registry.add(provider.clone());
+            Some(provider)
+        } else {
+            warn!(
+                "Apple Container integration enabled but the 'container' CLI was not found. \
+                 Continuing without Apple Container support."
+            );
+            None
+        }
+    } else {
+        None
+    };
+
     let registry = Arc::new(registry);
 
     let server = Server::new(&config, paths, reload_rx, reload_tx.clone(), registry)?;
@@ -92,13 +117,30 @@ pub async fn run(verbose: bool, config_path: &Path, paths: &RoxyPaths) -> Result
     // Spawn Docker watcher if enabled
     if let Some(provider) = docker_provider {
         let cancel_docker = cancel.clone();
-        let docker_reload_tx = reload_tx;
+        let docker_reload_tx = reload_tx.clone();
         tokio::spawn(async move {
             crate::infrastructure::docker::watcher::watch(
                 provider.docker().clone(),
                 provider.state(),
                 docker_reload_tx,
                 cancel_docker,
+            )
+            .await;
+        });
+    }
+
+    // Spawn Apple Container watcher if enabled
+    if let Some(provider) = apple_container_provider {
+        let cancel_apple = cancel.clone();
+        let apple_reload_tx = reload_tx;
+        let interval = config.apple_container.poll_interval();
+        tokio::spawn(async move {
+            crate::infrastructure::apple_container::watcher::watch(
+                provider.cli().clone(),
+                provider.state(),
+                apple_reload_tx,
+                cancel_apple,
+                interval,
             )
             .await;
         });

@@ -69,14 +69,15 @@ den einzigen strukturellen Vorteil von Apple Container wegwerfen.
 Container mit genau einem publizierten Port wird ohne weiteres Zutun registriert,
 sobald er `roxy.enable=true` trägt.
 
-**E3 — Poll-Intervall.** *(Diffing in C2 erledigt, Default-Intervall offen)*
-Der Watcher nimmt das Intervall als Parameter; der Default wird in D1 festgelegt.
-Vorschlag weiterhin 2s. Ein Tick kostet einen Prozessaufruf von `container ls`,
-also nicht beliebig klein wählen.
+**E3 — Poll-Intervall.** *(erledigt)*
+Default 2s, konfigurierbar über `apple_container.poll_interval_secs`. Ein Tick kostet
+einen Prozessaufruf von `container ls`, also nicht beliebig klein wählen. In der
+Praxis lag die Latenz von `container run` bis zum ersten erfolgreichen Request bei
+~6s, wovon der grössere Teil auf den Container-Start entfiel.
 
-**E4 — IP-Wechsel bei Restart.**
-Apple Container vergibt beim Neustart potenziell eine andere IP. Der Poller muss
-Änderungen an bestehenden Registrierungen erkennen, nicht nur Add/Remove.
+**E4 — IP-Wechsel bei Restart.** *(erledigt)*
+Bestätigt und gelöst: der Fingerprint in C2 enthält die Route-Ziele, ein IP-Wechsel
+löst deshalb einen Reload aus. Live nachgestellt, siehe „Ergebnis D".
 
 ---
 
@@ -159,13 +160,44 @@ damit als Testharness für B und C, ohne das System anzufassen.
 
 ### D — Konfiguration und Verdrahtung
 
-- [ ] **D1** `AppleContainerConfig { enabled: bool, poll_interval_secs: u64 }` in
-      `src/config.rs` neben `DockerConfig:102-106`, Default `enabled = false`.
-- [ ] **D2** Wiring in `src/daemon/lifecycle.rs:56-73` und `:93-105` — gleiche Struktur wie
-      der Docker-Zweig, inklusive Warn-and-Continue, wenn die CLI fehlt.
-- [ ] **D3** Kollisionsverhalten bei gleichem Domainnamen aus mehreren Providern klären.
-      `ProviderRegistry::load` konkateniert nur (`provider_registry.rs:40-57`) — wer gewinnt?
-      Aktuell ungeklärt, muss vor dem Merge entschieden sein.
+- [x] **D1** **Erledigt** (2026-08-06). `AppleContainerConfig { enabled, poll_interval_secs }`
+      in `src/config.rs`, Default `enabled = false`, Intervall 2s. `validate()` lehnt
+      Intervall 0 ab, aber nur wenn aktiviert. Sektion darf komplett fehlen.
+- [x] **D2** **Erledigt.** Wiring in `src/daemon/lifecycle.rs` analog zum Docker-Zweig,
+      inklusive Warn-and-Continue, wenn die CLI fehlt. Live verifiziert, siehe
+      „Ergebnis D".
+- [x] **D3** **Entschieden:** first match wins, Reihenfolge Config-Datei > Docker >
+      Apple Container. Der Router nimmt den ersten Treffer (`src/daemon/router.rs:46-47`),
+      und `ProviderRegistry::load` konkateniert in Registrierungsreihenfolge — der
+      Apple-Container-Provider wird deshalb bewusst zuletzt hinzugefügt. Explizite
+      Nutzerkonfiguration schlägt damit jede Auto-Discovery.
+      Offen als spätere Verbesserung: eine Warnung, wenn zwei Provider dasselbe
+      Pattern liefern. Betrifft auch den bestehenden Docker-Provider.
+
+#### Ergebnis D
+
+Live gegen Apple Container 1.2.0, unprivilegierte Sandbox-Config mit
+`apple_container.enabled = true` und `poll_interval_secs = 2`:
+
+| Schritt | Beobachtung |
+|---|---|
+| Daemon gestartet, kein passender Container | `roxytest.roxy` → `404` |
+| `container run -l roxy.enable=true` | nach ~6s (Boot + Poll) → `307` |
+| Registrierung im Log | `roxytest.roxy => /=192.168.64.3:20128` — Container-IP, `containerPort` |
+| Container ohne Labels (`omniroute`) | übersprungen, mit Begründung im Debug-Log |
+| `container stop` | nach ~2s wieder `404`, „registration removed" im Log |
+| `container start` | Container kam auf `192.168.64.4` zurück, Watcher registrierte neu, Proxy wieder `307` |
+
+Der letzte Fall ist der Beleg für C2: gleicher Name, neue IP. Ein Diff nur über
+Domainnamen hätte den Wechsel verschluckt und der Proxy zeigte weiter auf `.3`.
+Der Fall trat beim allerersten Neustart von selbst auf.
+
+Ausserdem bestätigt: „added"/„removed" erscheinen genau einmal pro Änderung, nicht
+bei jedem Tick — das Diffing arbeitet wie vorgesehen.
+
+Nebenbefund: `roxy list` zeigt nur Registrierungen aus der Config-Datei, nicht die
+dynamisch entdeckten. Gilt für den Docker-Provider genauso. Ob das gewollt ist,
+wäre in E zu dokumentieren oder als eigener Punkt zu behandeln.
 
 ### E — Dokumentation
 

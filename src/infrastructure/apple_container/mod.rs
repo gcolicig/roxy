@@ -10,7 +10,7 @@
 pub mod cli;
 #[allow(dead_code)]
 pub mod discovery;
-#[allow(dead_code)]
 pub mod provider;
-#[allow(dead_code)]
 pub mod watcher;
+
+pub use provider::AppleContainerProvider;

@@ -2,7 +2,7 @@ mod dto;
 pub mod watcher;
 
 // Re-export shared config types so existing CLI/daemon code keeps compiling.
-pub use crate::config::{DaemonConfig, DockerConfig, RoxyPaths};
+pub use crate::config::{AppleContainerConfig, DaemonConfig, DockerConfig, RoxyPaths};
 
 use crate::application::ports::{ConfigLoadError, ConfigLoader, DomainRepository, RepositoryError};
 use crate::domain::value_objects::{RouteTarget, RouteTargetError};
@@ -49,6 +49,9 @@ pub struct Config {
     pub docker: DockerConfig,
 
     #[serde(default)]
+    pub apple_container: AppleContainerConfig,
+
+    #[serde(default)]
     domains: HashMap<String, RegistrationDto>,
 }
 
@@ -64,6 +67,9 @@ impl Config {
 
     pub fn validate(&self) -> Result<(), ConfigError> {
         self.daemon.validate().map_err(ConfigError::InvalidConfig)?;
+        self.apple_container
+            .validate()
+            .map_err(ConfigError::InvalidConfig)?;
 
         for (name, dto) in &self.domains {
             let registration = DomainRegistration::from(dto.clone());
@@ -263,6 +269,54 @@ impl DomainRepository for ConfigStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // --- AppleContainerConfig ---
+
+    #[test]
+    fn apple_container_is_disabled_by_default() {
+        let config = AppleContainerConfig::default();
+        assert!(!config.enabled);
+        assert_eq!(config.poll_interval_secs, 2);
+        assert!(config.validate().is_ok());
+    }
+
+    #[test]
+    fn apple_container_section_may_be_omitted_entirely() {
+        let config: Config = toml::from_str("[daemon]\nhttp_port = 80\n").unwrap();
+        assert!(!config.apple_container.enabled);
+        assert_eq!(config.apple_container.poll_interval_secs, 2);
+    }
+
+    #[test]
+    fn apple_container_poll_interval_is_read_from_config() {
+        let config: Config =
+            toml::from_str("[apple_container]\nenabled = true\npoll_interval_secs = 5\n").unwrap();
+        assert!(config.apple_container.enabled);
+        assert_eq!(config.apple_container.poll_interval().as_secs(), 5);
+    }
+
+    #[test]
+    fn zero_poll_interval_is_invalid_when_enabled() {
+        let config = AppleContainerConfig {
+            enabled: true,
+            poll_interval_secs: 0,
+        };
+        assert!(
+            config
+                .validate()
+                .unwrap_err()
+                .contains("poll_interval_secs cannot be 0")
+        );
+    }
+
+    #[test]
+    fn zero_poll_interval_is_tolerated_while_disabled() {
+        let config = AppleContainerConfig {
+            enabled: false,
+            poll_interval_secs: 0,
+        };
+        assert!(config.validate().is_ok());
+    }
 
     // --- DaemonConfig::validate ---
 
