@@ -8,3 +8,5 @@
 // Wired up incrementally; see BACKLOG.md blocks B–D.
 #[allow(dead_code)]
 pub mod cli;
+#[allow(dead_code)]
+pub mod discovery;

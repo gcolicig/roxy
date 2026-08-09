@@ -65,6 +65,10 @@ Damit gibt es zwei brauchbare Quellen und eine Rangfolge ist nötig. Vorschlag:
 Bewusst **nicht** genutzt: `hostPort` als Ziel. Das würde Dockers Umweg nachbauen und
 den einzigen strukturellen Vorteil von Apple Container wegwerfen.
 
+**So in B2 implementiert.** Offen bleibt nur, ob Punkt 2 zu grosszügig ist: ein
+Container mit genau einem publizierten Port wird ohne weiteres Zutun registriert,
+sobald er `roxy.enable=true` trägt.
+
 **E3 — Poll-Intervall und Diffing.**
 Kein Event-Stream heisst: Intervall wählen, gegen letzten Stand diffen, Reload nur bei
 echter Änderung. Vorschlag: 2s Default, konfigurierbar, Reload nur wenn sich das
@@ -126,9 +130,14 @@ damit als Testharness für B und C, ohne das System anzufassen.
       13 Unit-Tests gegen eine echte aufgezeichnete Ausgabe (`fixtures/container_ls.json`,
       ein laufender und ein gestoppter Container) plus ein `#[ignore]`-Test gegen die
       echte CLI, der die Argument-Schreibweise absichert.
-- [ ] **B2** `discovery.rs` — `evaluate_container`-Äquivalent gegen Container-IP statt
-      `127.0.0.1:host_port`. Qualifikation über `roxy.enable=true` + `roxy.domain`.
-      Skip mit Begründung, wenn Container nicht läuft oder keine IPv4 hat.
+- [x] **B2** `discovery.rs` — **erledigt** (2026-08-06). `evaluate_container` gegen
+      Container-IP + `containerPort`. Qualifikation: `roxy.enable=true` **oder**
+      `roxy.domain` (ein gesetztes Domain-Label ist bereits eindeutige Absicht),
+      `roxy.enable=false` sticht beides. Domain aus `roxy.domain`, sonst
+      `{container-id}.roxy`. Port nach der in E2 beschlossenen Rangfolge.
+      Zusätzlich `roxy.wildcard` wie beim Docker-Provider. Jeder Skip trägt eine
+      Begründung, die den fehlenden Knopf benennt. 17 Unit-Tests.
+      Registrierungen sind `RegistrationSource::External` mit aktiviertem HTTPS.
 - [ ] **B3** `provider.rs` — `RegistrationProvider` implementieren, Shape analog
       `DockerProvider` (Zustand in `state()`, damit der Watcher ihn teilen kann).
 - [ ] **B4** Unit-Tests gegen eingefrorene JSON-Fixtures aus echtem `container ls`-Output.
