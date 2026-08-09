@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use tracing::warn;
@@ -39,10 +40,29 @@ impl RegistrationProvider for ProviderRegistry {
 
     fn load(&self) -> anyhow::Result<Vec<DomainRegistration>> {
         let mut all = Vec::new();
+        // Which provider first claimed each pattern, for collision reporting.
+        let mut claimed: HashMap<String, &str> = HashMap::new();
 
         for provider in &self.providers {
             match provider.load() {
-                Ok(regs) => all.extend(regs),
+                Ok(regs) => {
+                    for reg in regs {
+                        let pattern = reg.display_pattern();
+                        match claimed.get(pattern.as_str()) {
+                            Some(winner) => warn!(
+                                domain = %pattern,
+                                serving = winner,
+                                shadowed = provider.name(),
+                                "Duplicate domain from multiple providers; \
+                                 the earlier provider keeps serving it"
+                            ),
+                            None => {
+                                claimed.insert(pattern, provider.name());
+                            }
+                        }
+                        all.push(reg);
+                    }
+                }
                 Err(e) => {
                     warn!(
                         provider = provider.name(),
@@ -92,6 +112,46 @@ mod tests {
         let pattern = DomainPattern::Exact(name);
         let routes = vec![Route::parse("/=3000").unwrap()];
         DomainRegistration::new(pattern, routes)
+    }
+
+    #[test]
+    fn duplicate_patterns_are_kept_in_provider_order() {
+        // The router takes the first match, so the earlier provider must
+        // stay ahead of the later one even when both claim the domain.
+        let mut registry = ProviderRegistry::new();
+        registry.add(Arc::new(FixedProvider {
+            name: "config-file",
+            registrations: vec![test_reg("app.roxy")],
+        }));
+        registry.add(Arc::new(FixedProvider {
+            name: "apple-container",
+            registrations: vec![test_reg("app.roxy")],
+        }));
+
+        let loaded = registry.load().unwrap();
+        assert_eq!(loaded.len(), 2, "duplicates are reported, not dropped");
+        assert!(loaded.iter().all(|r| r.display_pattern() == "app.roxy"));
+    }
+
+    #[test]
+    fn distinct_patterns_from_several_providers_all_load() {
+        let mut registry = ProviderRegistry::new();
+        registry.add(Arc::new(FixedProvider {
+            name: "config-file",
+            registrations: vec![test_reg("app.roxy")],
+        }));
+        registry.add(Arc::new(FixedProvider {
+            name: "apple-container",
+            registrations: vec![test_reg("web.roxy")],
+        }));
+
+        let patterns: Vec<String> = registry
+            .load()
+            .unwrap()
+            .iter()
+            .map(|r| r.display_pattern())
+            .collect();
+        assert_eq!(patterns, vec!["app.roxy", "web.roxy"]);
     }
 
     #[test]

@@ -5,10 +5,13 @@ use crate::application::list_all_domains::ListAllDomains;
 use crate::domain::{RegistrationSource, RouteTarget};
 
 pub fn execute(ctx: &AppContext) -> Result<()> {
-    let docker_enabled = ctx
+    // Discovered domains live in the daemon, not the config file. If a
+    // discovery provider is on but the daemon is down, `list` silently
+    // shows less than the user expects — so say why.
+    let discovery_enabled = ctx
         .config_store
         .load()
-        .map(|c| c.docker.enabled)
+        .map(|c| c.docker.enabled || c.apple_container.enabled)
         .unwrap_or(false);
 
     let use_case = ListAllDomains::new(&ctx.mgmt_client, &ctx.config_store, &ctx.cert_service);
@@ -19,8 +22,11 @@ pub fn execute(ctx: &AppContext) -> Result<()> {
         println!("\nRegister a domain with:");
         println!("  roxy register myapp.roxy --route \"/=3000\"");
         println!("  roxy register myapp.roxy --route \"/=3000\" --route \"/api=3001\"");
-        if !result.daemon_reachable && docker_enabled {
-            println!("\n  Note: Docker domains are only visible when the daemon is running.");
+        if !result.daemon_reachable && discovery_enabled {
+            println!(
+                "\n  Note: auto-discovered container domains are only visible \
+                 when the daemon is running."
+            );
         }
         return Ok(());
     }
@@ -61,8 +67,11 @@ pub fn execute(ctx: &AppContext) -> Result<()> {
         println!();
     }
 
-    if !result.daemon_reachable && docker_enabled {
-        println!("  Note: Docker domains are only visible when the daemon is running.");
+    if !result.daemon_reachable && discovery_enabled {
+        println!(
+            "  Note: auto-discovered container domains are only visible \
+             when the daemon is running."
+        );
     }
 
     Ok(())

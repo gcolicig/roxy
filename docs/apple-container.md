@@ -213,10 +213,11 @@ the log — every skip states its reason. The usual causes are a
 missing `roxy.enable` label, no resolvable port, or a container name
 that cannot form a valid domain.
 
-**`roxy list` shows nothing.** `list` reads the config file, so it
-only shows domains registered with `roxy register`. Auto-discovered
-domains live in the running daemon and do not appear there. This is
-also true of the Docker integration.
+**`roxy list` does not show a discovered domain.** Discovered domains
+live in the running daemon, not in the config file. `list` queries the
+daemon and marks them `[external]`, but falls back to config-only when
+the daemon is unreachable — in which case they are missing. Check that
+the daemon is running with `roxy status`.
 
 **The domain resolves but the request hangs or fails.** Check that
 the service inside the container listens on all interfaces

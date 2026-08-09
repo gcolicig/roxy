@@ -171,8 +171,8 @@ damit als Testharness für B und C, ohne das System anzufassen.
       und `ProviderRegistry::load` konkateniert in Registrierungsreihenfolge — der
       Apple-Container-Provider wird deshalb bewusst zuletzt hinzugefügt. Explizite
       Nutzerkonfiguration schlägt damit jede Auto-Discovery.
-      Offen als spätere Verbesserung: eine Warnung, wenn zwei Provider dasselbe
-      Pattern liefern. Betrifft auch den bestehenden Docker-Provider.
+      Die Warnung bei doppeltem Pattern ist inzwischen umgesetzt
+      (`src/application/provider_registry.rs`), siehe „Ergebnis Kollisionswarnung".
 
 #### Ergebnis D
 
@@ -195,10 +195,14 @@ Der Fall trat beim allerersten Neustart von selbst auf.
 Ausserdem bestätigt: „added"/„removed" erscheinen genau einmal pro Änderung, nicht
 bei jedem Tick — das Diffing arbeitet wie vorgesehen.
 
-Nebenbefund: `roxy list` zeigt nur Registrierungen aus der Config-Datei, nicht die
-dynamisch entdeckten. Gilt für den Docker-Provider genauso. In E1 als bekanntes
-Verhalten im Troubleshooting dokumentiert; ob es so bleiben soll, ist damit noch
-nicht entschieden.
+**Korrektur zum früheren Nebenbefund:** Die Aussage „`roxy list` zeigt dynamisch
+entdeckte Domains nicht" war falsch. `ListAllDomains` fragt zuerst den Daemon ab und
+markiert externe Registrierungen mit `[external]`
+(`src/application/list_all_domains.rs:47-76`, `src/cli/list.rs:41-45`). Im damaligen
+Test schlug nur die Verbindung zum Management-Socket fehl, weil der Sandbox-Pfad
+länger war als `SUN_LEN` erlaubt (`ERROR Management socket error error=path must be
+shorter than SUN_LEN`). Mit kurzem Socket-Pfad erscheint die Domain korrekt. Die
+falsche Passage in `docs/apple-container.md` ist ersetzt.
 
 ### E — Dokumentation
 
@@ -217,6 +221,25 @@ nicht entschieden.
       (`just changelog`) konnte daher nicht laufen.
 
 ---
+
+## Ergebnis Kollisionswarnung
+
+`ProviderRegistry::load` meldet jetzt, wenn zwei Provider dasselbe Pattern liefern.
+Duplikate werden weiterhin durchgereicht — der Router entscheidet über die
+Reihenfolge, die Registry mischt sich nicht ein.
+
+Live nachgestellt: Container `omniroute-dev.roxy` per Label entdeckt, danach
+dieselbe Domain per `roxy register` in die Config geschrieben.
+
+| Schritt | Beobachtung |
+|---|---|
+| Nur Container | `307` vom Container, `roxy list` zeigt `[external]` |
+| Config-Eintrag dazu (Ziel `127.0.0.1:9999`, tot) | `WARN Duplicate domain … serving="config-file" shadowed="apple-container"` |
+| Request | `502` — die Config gewinnt tatsächlich, nicht nur laut Dokumentation |
+| `roxy unregister --force` | wieder `307` vom Container |
+
+Das `502` ist der eigentliche Beweis: die Rangfolge aus D3 ist nicht bloss
+dokumentiert, sondern beobachtbar.
 
 ## Nicht im Scope
 
@@ -246,7 +269,13 @@ nicht entschieden.
   `cargo clippy --all-targets` meldet nur Vorbestehendes in `src/application/testkit.rs`.
 - Schema für laufende **und** gestoppte Container verifiziert: gestoppt heisst
   `status.state = "stopped"`, `status.networks = []`, kein `startedDate`.
-- Noch **nicht** geprüft: Netzwerk-Typ `bridge` (Fixture nur mit `variant: reserved`),
-  und WebSocket-Weiterleitung an ein Container-Ziel.
+- WebSocket an ein Container-Ziel: **teilweise** geprüft. Der WS-Pfad wird betreten,
+  der TCP-Connect auf die Container-IP gelingt und der Upgrade-Request geht raus
+  (`Proxying WebSocket request` / `Connecting to backend` / `upgrade request sent`,
+  Ziel `192.168.64.5:20128`). Ein vollständiger Handshake liess sich nicht belegen,
+  weil die Testanwendung unter `/` keinen WS-Endpunkt anbietet — der direkte Aufruf
+  ohne roxy verhält sich identisch. Für einen echten Nachweis braucht es ein Image
+  mit WS-Server.
+- Noch **nicht** geprüft: Netzwerk-Typ `bridge` (Fixture nur mit `variant: reserved`).
 - Die Einordnung von `portless`, `dev-bind` und `rust-rpxy` stammt aus einer Recherche
   ausserhalb dieses Repos und ist nicht gegen deren Quellcode verifiziert.

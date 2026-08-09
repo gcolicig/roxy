@@ -6,7 +6,6 @@ use crate::domain::DomainRegistration;
 /// The daemon merges registrations from all providers.
 pub trait RegistrationProvider: Send + Sync {
     /// Human-readable name ("config-file", "docker").
-    #[allow(dead_code)] // Used by tests and future multi-provider logging.
     fn name(&self) -> &str;
 
     /// Load current registrations from this source.
