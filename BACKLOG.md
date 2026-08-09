@@ -69,10 +69,10 @@ den einzigen strukturellen Vorteil von Apple Container wegwerfen.
 Container mit genau einem publizierten Port wird ohne weiteres Zutun registriert,
 sobald er `roxy.enable=true` trägt.
 
-**E3 — Poll-Intervall und Diffing.**
-Kein Event-Stream heisst: Intervall wählen, gegen letzten Stand diffen, Reload nur bei
-echter Änderung. Vorschlag: 2s Default, konfigurierbar, Reload nur wenn sich das
-Registrierungs-Set tatsächlich unterscheidet.
+**E3 — Poll-Intervall.** *(Diffing in C2 erledigt, Default-Intervall offen)*
+Der Watcher nimmt das Intervall als Parameter; der Default wird in D1 festgelegt.
+Vorschlag weiterhin 2s. Ein Tick kostet einen Prozessaufruf von `container ls`,
+also nicht beliebig klein wählen.
 
 **E4 — IP-Wechsel bei Restart.**
 Apple Container vergibt beim Neustart potenziell eine andere IP. Der Poller muss
@@ -138,18 +138,24 @@ damit als Testharness für B und C, ohne das System anzufassen.
       Zusätzlich `roxy.wildcard` wie beim Docker-Provider. Jeder Skip trägt eine
       Begründung, die den fehlenden Knopf benennt. 17 Unit-Tests.
       Registrierungen sind `RegistrationSource::External` mit aktiviertem HTTPS.
-- [ ] **B3** `provider.rs` — `RegistrationProvider` implementieren, Shape analog
-      `DockerProvider` (Zustand in `state()`, damit der Watcher ihn teilen kann).
-- [ ] **B4** Unit-Tests gegen eingefrorene JSON-Fixtures aus echtem `container ls`-Output.
-      Kein Aufruf der CLI im Test.
+- [x] **B3** `provider.rs` — **erledigt** (2026-08-06). `AppleContainerProvider`
+      implementiert `RegistrationProvider`, Shape analog `DockerProvider`
+      (`state()` für den Watcher, `cli()` für den Poll-Aufruf). Name:
+      `apple-container`.
+- [x] **B4** Unit-Tests gegen eingefrorene Fixtures — mit B1 erledigt.
 
 ### C — Watcher
 
-- [ ] **C1** Poll-Loop mit `CancellationToken`, Intervall aus Config (E3).
-- [ ] **C2** Diffing gegen den letzten Stand; Reload nur bei echter Änderung des
-      Registrierungs-Sets — inklusive IP-Änderung bei gleichem Container (E4).
-- [ ] **C3** Fehler im Poll-Loop loggen und weiterlaufen, nicht abbrechen. Ein temporär
-      nicht erreichbarer `container`-Daemon darf den roxy-Daemon nicht mitreissen.
+- [x] **C1** **Erledigt** (2026-08-06). Poll-Loop mit `CancellationToken`, Intervall als
+      Parameter (Config-Anbindung folgt in D1). `list_all` läuft in `spawn_blocking`,
+      damit der Prozessaufruf den Async-Runtime nicht blockiert.
+- [x] **C2** **Erledigt.** Diffing über einen Fingerprint aus Pattern **und** Route-Zielen.
+      Reload-Nudge nur bei echter Änderung. Der Docker-Watcher vergleicht an dieser
+      Stelle nur Domainnamen (`docker/watcher.rs:226-228`) und würde einen IP-Wechsel
+      bei gleichbleibendem Namen übersehen — für Apple Container wäre das der
+      Normalfall, siehe E4. Ein Test hält das explizit fest.
+- [x] **C3** **Erledigt.** Fehler im Poll-Loop werden geloggt, der letzte gute Zustand
+      bleibt stehen, der nächste Tick versucht es erneut.
 
 ### D — Konfiguration und Verdrahtung
 

@@ -179,6 +179,7 @@ pub fn parse_containers(json: &str) -> Result<Vec<Container>, ContainerCliError>
 ///
 /// Apple Container exposes no daemon socket and no event stream, so every
 /// query is a process invocation. Callers poll; see the watcher.
+#[derive(Debug, Clone)]
 pub struct ContainerCli {
     binary: String,
 }
