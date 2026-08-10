@@ -195,6 +195,9 @@ pub fn parse_containers(json: &str) -> Result<Vec<Container>, ContainerCliError>
 pub struct ContainerCli {
     binary: String,
     timeout: Duration,
+    /// When set, invocations run as this uid via `launchctl asuser` +
+    /// `sudo -u`. See [`ContainerCli::run_as_uid`].
+    run_as: Option<u32>,
 }
 
 impl Default for ContainerCli {
@@ -208,6 +211,7 @@ impl ContainerCli {
         Self {
             binary: binary.into(),
             timeout: DEFAULT_TIMEOUT,
+            run_as: None,
         }
     }
 
@@ -216,7 +220,45 @@ impl ContainerCli {
         Self {
             binary: binary.into(),
             timeout,
+            run_as: None,
         }
+    }
+
+    /// Run every invocation as the given user instead of the current one.
+    ///
+    /// Apple Container is per-user: its API server runs as a launchd agent
+    /// in the user's GUI session and rejects callers with a different euid
+    /// ("unauthorized request"). A root daemon therefore sees no containers.
+    /// `launchctl asuser` selects the user's bootstrap namespace (so the
+    /// XPC services resolve) and `sudo -u '#uid'` drops to the matching
+    /// euid — both are required; either alone still gets rejected.
+    pub fn run_as_uid(mut self, uid: u32) -> Self {
+        self.run_as = Some(uid);
+        self
+    }
+
+    /// The full argv for an invocation, wrapper included.
+    ///
+    /// Separated from spawning so the elevation wrapping is unit-testable.
+    fn invocation(&self, args: &[&str]) -> Vec<String> {
+        let mut argv: Vec<String> = Vec::new();
+        if let Some(uid) = self.run_as {
+            argv.extend(
+                [
+                    "/bin/launchctl",
+                    "asuser",
+                    &uid.to_string(),
+                    "sudo",
+                    "-n",
+                    "-u",
+                    &format!("#{uid}"),
+                ]
+                .map(String::from),
+            );
+        }
+        argv.push(self.binary.clone());
+        argv.extend(args.iter().map(|s| s.to_string()));
+        argv
     }
 
     /// List all containers, including stopped ones.
@@ -239,8 +281,9 @@ impl ContainerCli {
     /// `wait_with_output` future on timeout reaps the child instead of
     /// leaving it running and holding pipes open.
     async fn run(&self, args: &[&str]) -> Result<Vec<u8>, ContainerCliError> {
-        let child = Command::new(&self.binary)
-            .args(args)
+        let argv = self.invocation(args);
+        let child = Command::new(&argv[0])
+            .args(&argv[1..])
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -340,6 +383,36 @@ mod tests {
     #[test]
     fn parses_empty_listing() {
         assert!(parse_containers("[]").unwrap().is_empty());
+    }
+
+    #[test]
+    fn invocation_is_plain_without_run_as() {
+        let cli = ContainerCli::new("container");
+        assert_eq!(
+            cli.invocation(&["ls", "--all"]),
+            vec!["container", "ls", "--all"]
+        );
+    }
+
+    #[test]
+    fn invocation_wraps_with_asuser_and_sudo_when_run_as_is_set() {
+        let cli = ContainerCli::new("container").run_as_uid(501);
+        assert_eq!(
+            cli.invocation(&["ls"]),
+            vec![
+                "/bin/launchctl",
+                "asuser",
+                "501",
+                "sudo",
+                "-n",
+                "-u",
+                "#501",
+                "container",
+                "ls"
+            ],
+            "asuser picks the user's bootstrap namespace, sudo the euid; \
+             the API server rejects the call unless both match"
+        );
     }
 
     #[test]

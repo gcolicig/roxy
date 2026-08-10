@@ -206,6 +206,40 @@ from more than one source, the first match wins in this order:
 In other words, anything you registered explicitly takes precedence
 over auto-discovery.
 
+## Known Pitfalls on macOS
+
+### Roxy's DNS port collides with Apple Container's
+
+Apple Container's API server (`container-apiserver`) binds
+`127.0.0.1:1053` for its embedded DNS — which is exactly Roxy's
+default `dns_port`. With both installed, Roxy's DNS server fails to
+start (`Address already in use`) and `.roxy` names stop resolving,
+because `/etc/resolver/roxy` points at a port that Apple Container
+now answers.
+
+Fix: pick a different port in `/etc/roxy/config.toml` and re-run
+install so the resolver file is rewritten:
+
+```toml
+[daemon]
+dns_port = 10053
+```
+
+```bash
+sudo roxy install
+sudo roxy restart
+```
+
+### Running the daemon as root
+
+Apple Container is per-user: its API server runs as a launchd agent
+in your GUI session and rejects callers with a different euid
+("unauthorized request"). Since the Roxy daemon typically runs as
+root (ports 80/443), it impersonates the console user automatically
+when invoking the `container` CLI, via `launchctl asuser` +
+`sudo -u`. No configuration needed — but discovery only works while
+a user is logged into the GUI session that owns Apple Container.
+
 ## Troubleshooting
 
 **A container is not picked up.** Run the daemon with `-v` and check

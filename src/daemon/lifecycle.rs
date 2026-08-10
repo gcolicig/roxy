@@ -83,7 +83,18 @@ pub async fn run(verbose: bool, config_path: &Path, paths: &RoxyPaths) -> Result
     // duplicate domain the router takes the first match, making the order
     // config file > Docker > Apple Container.
     let apple_container_provider = if config.apple_container.enabled {
-        let cli = ContainerCli::default();
+        // Apple Container is per-user; a root daemon must impersonate the
+        // console user or its API server rejects every call.
+        let cli = match crate::infrastructure::apple_container::run_as_uid_for_root() {
+            Some(uid) => {
+                info!(
+                    uid,
+                    "Running as root; invoking the container CLI as the console user"
+                );
+                ContainerCli::default().run_as_uid(uid)
+            }
+            None => ContainerCli::default(),
+        };
         if cli.is_available().await {
             info!("Apple Container integration enabled");
             let provider = Arc::new(AppleContainerProvider::new(cli));
