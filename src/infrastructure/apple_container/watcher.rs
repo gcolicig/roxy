@@ -225,4 +225,167 @@ mod tests {
         assert!(registrations_from(&[]).is_empty());
         assert!(fingerprint(&[]).is_empty());
     }
+
+    /// Loop-level tests. The review of this branch found two defects
+    /// (unbounded CLI calls, cancellation not raced against reconcile)
+    /// that the pure-helper tests above could not catch, so the loop
+    /// itself is exercised here against a scripted stand-in CLI.
+    #[cfg(unix)]
+    mod loop_tests {
+        use std::os::unix::fs::PermissionsExt;
+        use std::path::{Path, PathBuf};
+
+        use super::*;
+
+        const RUNNING_WEB: &str = r#"[{"id":"web",
+            "configuration":{"labels":{"roxy.enable":"true"},
+                "publishedPorts":[{"containerPort":8080,"hostPort":18080,"proto":"tcp"}]},
+            "status":{"state":"running","networks":[{"ipv4Address":"192.168.64.2/24"}]}}]"#;
+
+        const RUNNING_WEB_MOVED: &str = r#"[{"id":"web",
+            "configuration":{"labels":{"roxy.enable":"true"},
+                "publishedPorts":[{"containerPort":8080,"hostPort":18080,"proto":"tcp"}]},
+            "status":{"state":"running","networks":[{"ipv4Address":"192.168.65.9/24"}]}}]"#;
+
+        /// A scripted CLI: cats a sibling data file, ignoring its args.
+        /// Swapping the file's content between polls simulates container
+        /// churn without a real Apple Container installation.
+        struct FakeCli {
+            dir: PathBuf,
+        }
+
+        impl FakeCli {
+            fn new(name: &str, initial_json: &str) -> Self {
+                let dir = std::env::temp_dir().join(format!("roxy-watcher-test-{name}"));
+                std::fs::create_dir_all(&dir).unwrap();
+                let script = dir.join("container");
+                std::fs::write(
+                    &script,
+                    format!("#!/bin/sh\ncat {}\n", dir.join("output.json").display()),
+                )
+                .unwrap();
+                std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+                let fake = Self { dir };
+                fake.set_output(initial_json);
+                fake
+            }
+
+            fn set_output(&self, json: &str) {
+                std::fs::write(self.dir.join("output.json"), json).unwrap();
+            }
+
+            fn script(&self) -> String {
+                self.dir.join("container").to_string_lossy().into_owned()
+            }
+        }
+
+        impl Drop for FakeCli {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.dir);
+            }
+        }
+
+        fn targets(state: &Arc<RwLock<Vec<DomainRegistration>>>) -> Vec<String> {
+            fingerprint(&state.read().unwrap())
+        }
+
+        async fn recv_nudge(rx: &mut mpsc::Receiver<()>) -> bool {
+            tokio::time::timeout(Duration::from_secs(5), rx.recv())
+                .await
+                .is_ok_and(|msg| msg.is_some())
+        }
+
+        fn spawn_watch(
+            script: &str,
+            state: &Arc<RwLock<Vec<DomainRegistration>>>,
+            cancel: &CancellationToken,
+        ) -> (tokio::task::JoinHandle<()>, mpsc::Receiver<()>) {
+            let (tx, rx) = mpsc::channel(4);
+            let handle = tokio::spawn(watch(
+                ContainerCli::new(script),
+                state.clone(),
+                tx,
+                cancel.clone(),
+                Duration::from_millis(50),
+            ));
+            (handle, rx)
+        }
+
+        #[tokio::test]
+        async fn discovers_on_first_poll_and_nudges_once() {
+            let fake = FakeCli::new("discover", RUNNING_WEB);
+            let state = Arc::new(RwLock::new(Vec::new()));
+            let cancel = CancellationToken::new();
+            let (handle, mut rx) = spawn_watch(&fake.script(), &state, &cancel);
+
+            assert!(recv_nudge(&mut rx).await, "first poll should nudge");
+            assert_eq!(targets(&state), vec!["web.roxy => /=192.168.64.2:8080"]);
+
+            // Several unchanged polls later there must be no second nudge.
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            assert!(
+                rx.try_recv().is_err(),
+                "unchanged listings must not renudge the server"
+            );
+
+            cancel.cancel();
+            handle.await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn ip_change_is_picked_up_and_nudges_again() {
+            let fake = FakeCli::new("ip-change", RUNNING_WEB);
+            let state = Arc::new(RwLock::new(Vec::new()));
+            let cancel = CancellationToken::new();
+            let (handle, mut rx) = spawn_watch(&fake.script(), &state, &cancel);
+
+            assert!(recv_nudge(&mut rx).await);
+            fake.set_output(RUNNING_WEB_MOVED);
+
+            assert!(recv_nudge(&mut rx).await, "moved IP should renudge");
+            assert_eq!(targets(&state), vec!["web.roxy => /=192.168.65.9:8080"]);
+
+            cancel.cancel();
+            handle.await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn failing_cli_keeps_last_good_state() {
+            let fake = FakeCli::new("fail", RUNNING_WEB);
+            let state = Arc::new(RwLock::new(Vec::new()));
+            let cancel = CancellationToken::new();
+            let (handle, mut rx) = spawn_watch(&fake.script(), &state, &cancel);
+
+            assert!(recv_nudge(&mut rx).await);
+            let before = targets(&state);
+
+            // Deleting the data file makes every subsequent poll fail.
+            std::fs::remove_file(Path::new(&fake.dir.join("output.json"))).unwrap();
+            tokio::time::sleep(Duration::from_millis(300)).await;
+
+            assert_eq!(
+                targets(&state),
+                before,
+                "a failed poll must not wipe the registrations"
+            );
+            assert!(rx.try_recv().is_err(), "failures must not nudge");
+
+            cancel.cancel();
+            handle.await.unwrap();
+        }
+
+        #[tokio::test]
+        async fn cancellation_ends_the_loop() {
+            let fake = FakeCli::new("cancel", RUNNING_WEB);
+            let state = Arc::new(RwLock::new(Vec::new()));
+            let cancel = CancellationToken::new();
+            let (handle, _rx) = spawn_watch(&fake.script(), &state, &cancel);
+
+            cancel.cancel();
+            tokio::time::timeout(Duration::from_secs(5), handle)
+                .await
+                .expect("watch must return promptly after cancellation")
+                .unwrap();
+        }
+    }
 }

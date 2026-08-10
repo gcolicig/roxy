@@ -254,8 +254,9 @@ projekteigenen `CLAUDE.md` (Rules 2/3/5/6), Lock-Nutzung (kein Guard über einem
 `.await`), Kanal-Backpressure, und die Behauptung zur Provider-Reihenfolge — der
 Sort in `router.rs:30-35` ist stabil, die Add-Reihenfolge bleibt also erhalten.
 
-Bekannte Lücke: `reconcile()` und `watch()` selbst sind nicht getestet, nur ihre
-reinen Hilfsfunktionen. Beide Befunde wären dadurch auch nicht aufgefallen.
+Die vom Review benannte Lücke — `reconcile()`/`watch()` ungetestet — ist inzwischen
+geschlossen: vier Loop-Tests fahren den echten `watch()`-Loop gegen eine geskriptete
+Stand-in-CLI (Shell-Skript, das eine austauschbare JSON-Datei ausgibt).
 
 ## Ergebnis Kollisionswarnung
 
@@ -304,13 +305,18 @@ dokumentiert, sondern beobachtbar.
   `cargo clippy --all-targets` meldet nur Vorbestehendes in `src/application/testkit.rs`.
 - Schema für laufende **und** gestoppte Container verifiziert: gestoppt heisst
   `status.state = "stopped"`, `status.networks = []`, kein `startedDate`.
-- WebSocket an ein Container-Ziel: **teilweise** geprüft. Der WS-Pfad wird betreten,
-  der TCP-Connect auf die Container-IP gelingt und der Upgrade-Request geht raus
-  (`Proxying WebSocket request` / `Connecting to backend` / `upgrade request sent`,
-  Ziel `192.168.64.5:20128`). Ein vollständiger Handshake liess sich nicht belegen,
-  weil die Testanwendung unter `/` keinen WS-Endpunkt anbietet — der direkte Aufruf
-  ohne roxy verhält sich identisch. Für einen echten Nachweis braucht es ein Image
-  mit WS-Server.
-- Noch **nicht** geprüft: Netzwerk-Typ `bridge` (Fixture nur mit `variant: reserved`).
+- WebSocket an ein Container-Ziel: **vollständig belegt** (2026-08-10, gegen
+  `jmalloc/echo-server`). Handshake durch roxy: `101 Switching Protocols` mit
+  korrektem `Sec-WebSocket-Accept`, danach maskierter Text-Frame `hello-roxy`
+  gesendet und als Echo-Frame zurückerhalten. Beide Richtungen laufen durch den
+  Proxy zur Container-IP.
+- Custom Networks (`container network create`): **geprüft.** Gleiches JSON-Schema
+  (`network`-Feld trägt den Netznamen, `variant` bleibt `reserved`), eigenes Subnetz
+  (`192.168.66.0/24`), Discovery und Proxying funktionieren unverändert — erwartbar,
+  da der Parser das erste Netz mit brauchbarer IPv4 nimmt, egal wie es heisst.
+- Der Watcher-Loop selbst ist jetzt getestet (siehe Ergebnis Review, letzter Absatz):
+  vier Loop-Tests gegen eine geskriptete Stand-in-CLI decken Erst-Discovery mit
+  genau einem Nudge, IP-Wechsel, Fehlertoleranz (letzter guter Stand bleibt) und
+  Cancellation ab.
 - Die Einordnung von `portless`, `dev-bind` und `rust-rpxy` stammt aus einer Recherche
   ausserhalb dieses Repos und ist nicht gegen deren Quellcode verifiziert.
