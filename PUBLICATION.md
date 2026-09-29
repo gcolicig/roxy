@@ -40,3 +40,20 @@ Status: **NICHT FREIGEGEBEN**
 - [ ] Apple-Container-Featurebranch prüfen und kontrolliert in den Release-Branch integrieren.
 - [ ] Discovery, DNS/HTTPS, Domainkonflikte, Timeouts und Watch-Loop reproduzierbar testen.
 - [ ] Upstream-Herkunft dokumentieren und Upstream-PR oder eigenständigen Release bewusst wählen.
+
+
+
+## Versionierte Veröffentlichungsabsicht
+
+Die Datei [publication.ini](publication.ini) wird bewusst versioniert und nicht in .gitignore eingetragen. Alle Checkouts und Agenten erhalten damit denselben überprüfbaren Wert. Eine lokale Kopie oder Template-Datei ist nicht erforderlich.
+
+```ini
+[publication]
+public = false
+```
+
+- `false`: keine Veröffentlichung freigegeben; Entwicklung und Stabilisierung sollen privat bleiben.
+- `true`: Veröffentlichung vorbereiten und ausdrückliche Eigentümerfreigabe für die konkrete Kandidaten-SHA einholen. Der Wert allein ist keine Freigabe.
+- Fehlende Datei, fehlende Sektion oder fehlender Schlüssel, ungültige INI-Syntax sowie jeder Wert ausser exakt `true` gelten als `false`.
+
+Der Wert beschreibt die Absicht, nicht die tatsächliche GitHub-Sichtbarkeit. Insbesondere wird ein bereits öffentliches Repository (aktuell roxy) durch `false` nicht automatisch privat. Auch `true`, grüne CI, Tags und Releases schalten nichts automatisch öffentlich. Eine Auswertung oder Automation ist derzeit nicht implementiert. Vor jeder Publikation müssen Wert und Freigabenachweis an derselben geprüften Kandidaten-SHA kontrolliert werden.
